@@ -1,0 +1,405 @@
+
+.ORG 0
+	; Initialize the stack pointer
+	LDI R20,HIGH(RAMEND)
+	OUT SPH,R20
+	LDI R20,LOW(RAMEND)
+	OUT SPL,R20
+	; Initialize X-pointer for EEPROM Key retrieval
+	LDI XH,HIGH(0x00)
+	LDI XL,LOW(0x00)
+
+	; Initialize the Y-pointer for Decrypted Message starting @ 0x200
+	LDI YH,HIGH(0x200)
+	LDI YL,LOW(0x200)
+
+	; Initialize the Z-pointer for Raw message starting @ 0x400
+	LDI ZH, HIGH(0x400)
+	LDI ZL, LOW(0x400)
+	LDI R16, 16
+; Loads the message
+MESSAGE_LOOP:
+ LPM R20, Z+
+ CALL STORE_IN_EEPROM ; Store R20 in EEPROM
+ INC XL ; increment to next EEPROM Location
+ DEC R16
+ BRNE MESSAGE_LOOP
+
+	; Next we load up the 64-bit Plaintext from the Program Memory using LPM and postinc on the Z pointer
+	; y is in R18-21
+	; z is in R22-25
+	LPM R18, Z+ ; Load into Reg 18
+	LPM R19, Z+ ; Load into Reg 19
+	LPM R20, Z+ ; Load into Reg 20
+	LPM R21, Z+ ; Load into Reg21
+	LPM R22, Z+ ; Load into Reg 22
+	LPM R23, Z+ ; Load into Reg23
+	LPM R24, Z+ ; Load into Reg 24
+	LPM R25, Z+ ; Load into Reg 25
+
+    ; Load the key from EEPROM into registers
+    ;  k0 in R2-R5, k1 in R6-R9, k2 in R10-R13, k3 in R14-R17
+	LPM R2, Z+ ; Load into Reg 2
+	LPM R3, Z+ ; Load into Reg 3
+	LPM R4, Z+ ; Load into Reg 4
+	LPM R5, Z+ ; Load into Reg5
+	LPM R6, Z+ ; Load into Reg 6
+	LPM R7, Z+ ; Load into Reg7
+	LPM R8, Z+ ; Load into Reg 8
+	LPM R9, Z+ ; Load into Reg 9
+	LPM R10, Z+ ; Load into Reg 10
+	LPM R11, Z+ ; Load into Reg 11
+	LPM R12, Z+ ; Load into Reg 12
+	LPM R13, Z+ ; Load into Reg13
+	LPM R14, Z+ ; Load into Reg 14
+	LPM R15, Z+ ; Load into Reg15
+	LPM R16, Z+ ; Load into Reg 16
+	LPM R17, Z+ ; Load into Reg 17
+
+	
+
+	; We encrpyt for 8 rounds
+	LDI R30, 32
+
+	 ; creating our Sum
+    CLR    R26
+    CLR    R27
+    CLR    R28
+    CLR    R29
+
+TEA_LOOP:
+
+	; sum = sum + delta (delta = 0x9E3779B9)
+    LDI    R31, 0xB9        ; delta LSB
+    ADD    R26, R31	; add to sum
+    LDI    R31, 0x79 ; load next piece of delta
+    ADC    R27, R31 ;add to sum
+    LDI    R31, 0x37 ; load next piece of delta
+    ADC    R28, R31 ;add to sum
+    LDI    R31, 0x9E ; load next piece of delta
+    ADC    R29, R31 ;add to sum
+
+	
+	; Save k0 (which is in R2-R5) into temporary SRAM addresses 0x0100-0x0103
+	STS 0x0100, R2
+	STS 0x0101, R3
+	STS 0x0102, R4
+	STS 0x0103, R5
+
+	; Store k2 for extra registers
+	STS 0x0104, R10
+	STS 0x0105, R11
+	STS 0x0106, R12
+	STS 0x0107, R13
+	; store R4-R7 for later 
+	STS 0x0108, R6
+	STS 0x0109, R7
+	STS 0x010A, R8
+	STS 0x010B, R9
+
+	; Copy z (in R22-R25) into temp registers R0-R3
+	MOV   R0, R22    ; z byte0
+	MOV   R1, R23    ; z byte1
+	MOV   R2, R24    ; z byte2
+	MOV   R3, R25    ; z byte3
+	; --- Compute A = (z << 4) + k0 ---
+	; Shift left z by 4 bits inline (4 iterations)
+	LSL   R0
+	ROL   R1
+	ROL   R2
+	ROL   R3
+
+	LSL   R0
+	ROL   R1
+	ROL   R2
+	ROL   R3
+
+	LSL   R0
+	ROL   R1
+	ROL   R2
+	ROL   R3
+
+	LSL   R0
+	ROL   R1
+	ROL   R2
+	ROL   R3
+
+	; Retrieve k0 from SRAM into temporary registers R4-R7 and store current values of R4-7
+	
+	LDS   R4, 0x0100
+	LDS   R5, 0x0101
+	LDS   R6, 0x0102
+	LDS   R7, 0x0103
+
+	; Add k0 to the shifted value: A = (z << 4) + k0
+	ADD   R0, R4
+	ADC   R1, R5
+	ADC   R2, R6
+	ADC   R3, R7
+	; Now A is in R0-R3
+
+	; -- Compute B = z + sum, result in R4-R7 --
+	MOV    R4, R22
+    MOV    R5, R23
+    MOV    R6, R24
+    MOV    R7, R25
+	ADD    R4, R26
+    ADC    R5, R27
+    ADC    R6, R28
+    ADC    R7, R29
+
+	; -- Compute C = (z >> 5) + k1, result in R10-R13 --
+	
+	MOV    R12, R22
+    MOV    R13, R23
+    MOV    R14, R24
+    MOV    R15, R25
+	; Shift them 5 times to the right
+    LSR    R13
+    ROR    R12
+    ROR    R11
+    ROR    R10
+
+    LSR    R13
+    ROR    R12
+    ROR    R11
+    ROR    R10
+
+    LSR    R13
+    ROR    R12
+    ROR    R11
+    ROR    R10
+
+    LSR    R13
+    ROR    R12
+    ROR    R11
+    ROR    R10
+
+    LSR    R13
+    ROR    R12
+    ROR    R11
+    ROR    R10
+	; Add k1 to C
+	; Pull k1 bytes 1 and 2 out of memory
+	LDS   R6, 0x0106
+	LDS   R7, 0x0107
+	ADD R10, R6
+	ADC R11, R7
+	ADC R12, R8
+	ADC R13, R9
+
+	; Compute X = A XOR B  XOR C
+	EOR R0, R4
+    EOR R1, R5
+    EOR R2, R6
+    EOR R3, R7
+    EOR R0, R10
+    EOR R1, R11
+    EOR R2, R12
+    EOR R3, R13
+
+	; y += X
+	ADD R18, R0
+    ADC R19, R1
+    ADC R20, R2
+    ADC R21, R3
+
+	; Restore all previous Reg values from storage
+	LDS   R2, 0x0100
+	LDS   R3, 0x0101
+	LDS   R4, 0x0102
+	LDS   R5, 0x0103
+	LDS   R10, 0x0104
+	LDS   R11, 0x0105
+	LDS   R12, 0x0106
+	LDS   R13, 0x0107
+	LDS   R4, 0x0108
+	LDS   R5, 0x0109
+	LDS   R6, 0x010A
+	LDS   R7, 0x010B
+
+	
+
+	; Z +=  [ ( (Y << 4) + k2 ) XOR (Y + sum ) XOR ( (Y >> 5) + k3 ) ]
+	; Save k0 (which is in R2-R5) into temporary SRAM addresses 0x0100-0x0103
+	STS 0x0100, R2
+	STS 0x0101, R3
+	STS 0x0102, R4
+	STS 0x0103, R5
+
+	; store R4-R7 (k1) for later 
+	STS 0x0104, R6
+	STS 0x0105, R7
+	STS 0x0106, R8
+	STS 0x0107, R9
+
+	; store R10-R13 (k2) for later
+	STS 0x0108, R10
+	STS 0x0109, R11
+	STS 0x010A, R12
+	STS 0x010B, R13
+
+	; Copy y (in R18-R21) into temp registers R0-R3
+	MOV   R0, R18    ; y byte0
+	MOV   R1, R19    ; y byte1
+	MOV   R2, R20    ; y byte2
+	MOV   R3, R21    ; y byte3
+
+	; --- Compute A = (y << 4) + k2 ---
+	; Shift left  by 4 bits inline (4 iterations)
+	LSL   R0
+	ROL   R1
+	ROL   R2
+	ROL   R3
+
+	LSL   R0
+	ROL   R1
+	ROL   R2
+	ROL   R3
+
+	LSL   R0
+	ROL   R1
+	ROL   R2
+	ROL   R3
+
+	LSL   R0
+	ROL   R1
+	ROL   R2
+	ROL   R3
+
+	; Add k2 to the shifted value: A = (y << 4) + k2
+	ADD   R0, R10
+	ADC   R1, R11
+	ADC   R2, R12
+	ADC   R3, R13
+	; A is in R0-R3
+
+	; Compute B = y + sum, result in R4-R7
+	MOV    R4, R18
+    MOV    R5, R19
+    MOV    R6, R20
+    MOV    R7, R21
+	ADD    R4, R26
+    ADC    R5, R27
+    ADC    R6, R28
+    ADC    R7, R29
+
+	; Compute C = (y>> 5) + k3, result in R10-R13 
+	MOV    R12, R18
+    MOV    R13, R19
+    MOV    R14, R20
+    MOV    R15, R21
+	; Shift them 5 times to the right
+    LSR    R13
+    ROR    R12
+    ROR    R11
+    ROR    R10
+
+    LSR    R13
+    ROR    R12
+    ROR    R11
+    ROR    R10
+
+    LSR    R13
+    ROR    R12
+    ROR    R11
+    ROR    R10
+
+    LSR    R13
+    ROR    R12
+    ROR    R11
+    ROR    R10
+
+    LSR    R13
+    ROR    R12
+    ROR    R11
+    ROR    R10
+
+	; Add k3 to C
+	ADD R10, R14
+	ADC R11, R15
+	ADC R12, R16
+	ADC R13, R17
+
+	; Compute X = A XOR B  XOR C
+	EOR R0, R4
+    EOR R1, R5
+    EOR R2, R6
+    EOR R3, R7
+    EOR R0, R10
+    EOR R1, R11
+    EOR R2, R12
+    EOR R3, R13
+
+	; z += X
+	ADD R22, R0
+    ADC R23, R1
+    ADC R24, R2
+    ADC R25, R3
+
+
+	; Restore all previous Reg values from storage
+	LDS   R2, 0x0100
+	LDS   R3, 0x0101
+	LDS   R4, 0x0102
+	LDS   R5, 0x0103
+	LDS   R6, 0x0104
+	LDS   R7, 0x0105
+	LDS   R8, 0x0106
+	LDS   R9, 0x0107
+	LDS   R10, 0x0108
+	LDS   R11, 0x0109
+	LDS   R12, 0x010A
+	LDS   R13, 0x010B
+
+	DEC R30 ; Decrement
+	CPI R30, 0 ; Check if 0
+	BREQ FINAL ;break if 0
+	RJMP TEA_LOOP ; restart loop
+
+	FINAL:
+	; Store all sum values to the SRAM
+	STS 0x0100, R18  
+    STS 0x0101, R19
+    STS 0x0102, R20
+    STS 0x0103, R21
+    STS 0x0104, R22
+    STS 0x0105, R23
+    STS 0x0106, R24
+    STS 0x0107, R25
+    STS 0x0108, R26
+	RJMP END
+
+
+LOAD_FROM_EEPROM:
+	SBIC EECR, EEPE
+	RJMP LOAD_FROM_EEPROM
+	OUT EEARH,XH
+	OUT EEARL,XL
+	SBI EECR,EERE
+	IN R20,EEDR
+	RET
+
+STORE_IN_EEPROM:
+	SBIC EECR, EEPE
+	RJMP STORE_IN_EEPROM
+	OUT EEARH,XH 
+	OUT EEARL,XL
+	OUT EEDR,R20
+	SBI EECR,EEMPE
+	SBI EECR,EEPE
+	RET
+
+
+	
+; Message: "I love computer engineering! GO REBELS GO!"
+.ORG 0x200
+MESSAGE: 
+.DB 0x49, 0x20, 0x6c, 0x6f, 0x76, 0x65, 0x20, 0x63, 0x6f, 0x6d, 0x70, 0x75, 0x74, 0x65, 0x72, 0x20, 0x65, 0x6e, 0x67, 0x69 
+.DB 0x6e, 0x65, 0x65, 0x72, 0x69, 0x6e, 0x67, 0x21,0x20,0x47,0x4f,0x20,0x52,0x45,0x42,0x45,0x4c,0x53,0x20,0x47,0x4f,0x21
+; KEY: "YKTFgWnvaloBflrr"
+.ORG 0x400
+KEY:.DB 0x59, 0x4b, 0x54, 0x46, 0x67, 0x57, 0x6e, 0x76, 0x61, 0x6c, 0x6f, 0x42, 0x66, 0x6c, 0x72, 0x72
+
+END:
+	RJMP END
